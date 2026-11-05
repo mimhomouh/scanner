@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Scanner">
+<meta name="theme-color" content="#101826">
+<title>Scanner Jackesta</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#101826;--panel:#1b2638;--text:#f2f5fa;--muted:#9fb0c8;--out:#2f7de1;--in:#f58a1f;--dup:#6b7686;--bad:#d64545;--ask:#d9a51c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Cairo,Tahoma,sans-serif;padding:env(safe-area-inset-top) 14px env(safe-area-inset-bottom)}
+header{display:flex;justify-content:space-between;align-items:center;padding:12px 0}
+h1{font-size:20px;margin:0}
+button{font:inherit;color:inherit;border:0;border-radius:10px;padding:10px 14px;background:var(--panel);cursor:pointer}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stats div{background:var(--panel);border-radius:10px;padding:8px;text-align:center}
+.stats b{display:block;font-size:24px}.stats span{font-size:12px;color:var(--muted)}
+#reader{margin:12px 0;border-radius:12px;overflow:hidden;background:#000;min-height:200px}
+.row{display:flex;gap:8px;margin-bottom:8px}.row>*{flex:1}
+.seg button.on{background:var(--out);font-weight:700}
+input{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid #33425a;background:var(--panel);color:var(--text);direction:ltr}
+#card{margin-top:12px;border-radius:14px;padding:16px;background:var(--panel);min-height:110px}
+#card h2{margin:0 0 6px;font-size:22px}
+#card p{margin:4px 0;font-size:16px}
+#card .meta{color:#fff;opacity:.85;font-size:14px}
+#card.out{background:var(--out)}#card.in{background:var(--in)}#card.dup{background:var(--dup)}
+#card.unknown,#card.error,#card.auth,#card.busy{background:var(--bad)}#card.confirm{background:var(--ask);color:#1b1500}
+#card .acts{display:flex;gap:8px;margin-top:10px}#card .acts button{flex:1;background:#fff;color:#1b1500;font-weight:700}
+</style>
+</head>
+<body>
+<header><h1>Scanner Jackesta</h1><button id="cfg">⚙ الإعدادات</button></header>
+<div class="stats">
+  <div><b id="sOut">–</b><span>خرجت اليوم</span></div>
+  <div><b id="sIn">–</b><span>استلمت اليوم</span></div>
+  <div><b id="sPend">–</b><span>مرتجعات تنتظرك</span></div>
+</div>
+<div id="reader"></div>
+<div class="row"><button id="start">تشغيل الكاميرا</button><button id="stop" hidden>إيقاف</button></div>
+<div class="row seg" id="seg"><button data-m="auto" class="on">تلقائي</button><button data-m="in">استلام مرتجع (IN)</button></div>
+<div class="row"><input id="manual" placeholder="Tracking يدوياً: WHO-19C-…" autocomplete="off" autocapitalize="characters"><button id="go" style="flex:0 0 80px">إرسال</button></div>
+<div id="card"><h2>جاهز للمسح</h2><p class="meta">وجّه الكاميرا نحو الباركود على البوردورو</p></div>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+const API_URL = 'https://script.google.com/macros/s/AKfycbzgHZutWqZjwgic64A1oPKf7cvbzyLdoEXA0nOWcMshTS1q4Po4HNeZTU5MkzA36rPvsw/exec'; // رابط Web App بعد النشر
+const $ = id => document.getElementById(id);
+let token = localStorage.getItem('sc_token') || '', who = localStorage.getItem('sc_who') || 'iPhone';
+let mode = 'auto', busy = false, last = { code: '', t: 0 }, pending = null, qr = null;
+
+function beep(f, d) { try { const a = new (window.AudioContext || window.webkitAudioContext)(), o = a.createOscillator(); o.frequency.value = f; o.connect(a.destination); o.start(); setTimeout(() => { o.stop(); a.close(); }, d); } catch (e) {} }
+function stats(s) { if (!s) return; $('sOut').textContent = s.outToday; $('sIn').textContent = s.inToday; $('sPend').textContent = s.pending; }
+function ensureToken() { if (!token) cfg(); return !!token; }
+function cfg() {
+  const t = prompt('الرمز السري (نفس رمز Apps Script):', token); if (t !== null) { token = t.trim(); localStorage.setItem('sc_token', token); }
+  const w = prompt('اسمك (يُسجل في السجل):', who); if (w !== null && w.trim()) { who = w.trim(); localStorage.setItem('sc_who', who); }
+  loadStats();
+}
+async function call(body) {
+  const r = await fetch(API_URL, { method: 'POST', body: JSON.stringify(Object.assign({ token: token, who: who }, body)) });
+  return r.json();
+}
+async function loadStats() { if (!token) return; try { const r = await call({ action: 'stats' }); if (r.stats) stats(r.stats); } catch (e) {} }
+
+function render(r, code) {
+  const c = $('card'); c.className = r.result || 'error';
+  const titles = { out: '✅ تم تسجيل الخروج', in: '📥 تم الاستلام في المخزن', dup: '⚠️ مسجل سابقاً', unknown: '❌ باركود غير معروف', confirm: '❓ تأكيد مطلوب', auth: '🔒 رمز غير صحيح', busy: '⏳ مشغول', error: '❌ خطأ' };
+  let h = '<h2>' + (titles[r.result] || '❌ خطأ') + '</h2><p>' + (r.msg || '') + '</p>';
+  if (r.order) h += '<p class="meta">' + r.order + ' — ' + (r.name || '') + '<br>حالة Noest: ' + (r.noest || '—') + (r.time ? '<br>' + r.time : '') + '</p>';
+  if (r.warn) h += '<p class="meta">⚠ ' + r.warn + '</p>';
+  if (r.result === 'confirm') { pending = { code: code, mode: r.pendingMode }; h += '<div class="acts"><button id="yes">نعم، سجّل</button><button id="no">إلغاء</button></div>'; }
+  c.innerHTML = h;
+  if (r.result === 'confirm') { $('yes').onclick = () => send(pending.code, true, pending.mode); $('no').onclick = () => { c.className = ''; c.innerHTML = '<h2>أُلغيت العملية</h2>'; }; }
+  beep(r.result === 'out' || r.result === 'in' ? 880 : 220, r.result === 'out' || r.result === 'in' ? 120 : 350);
+  stats(r.stats);
+}
+async function send(text, force, forceMode) {
+  if (!ensureToken() || busy) return;
+  busy = true; $('card').className = ''; $('card').innerHTML = '<h2>جاري التسجيل…</h2>';
+  try { render(await call({ code: text, mode: forceMode || mode, force: !!force }), text); }
+  catch (e) { render({ result: 'error', msg: 'تعذر الاتصال بالخادم: ' + e }); }
+  busy = false;
+}
+function onCode(text) {
+  const now = Date.now();
+  if (busy || (text === last.code && now - last.t < 4000)) return;
+  last = { code: text, t: now }; send(text, false);
+}
+$('start').onclick = async () => {
+  if (!ensureToken()) return;
+  qr = qr || new Html5Qrcode('reader', { formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128, Html5QrcodeSupportedFormats.QR_CODE], verbose: false });
+  try { await qr.start({ facingMode: 'environment' }, { fps: 10, qrbox: (w, h) => ({ width: Math.min(320, w - 20), height: 150 }) }, onCode, () => {}); $('start').hidden = true; $('stop').hidden = false; }
+  catch (e) { render({ result: 'error', msg: 'تعذر فتح الكاميرا: اسمح بها من إعدادات Safari' }); }
+};
+$('stop').onclick = async () => { await qr.stop(); $('start').hidden = false; $('stop').hidden = true; };
+$('seg').onclick = e => { const m = e.target.dataset.m; if (!m) return; mode = m; [...$('seg').children].forEach(b => b.classList.toggle('on', b === e.target)); };
+$('go').onclick = () => { const v = $('manual').value.trim(); if (v) { send(v, false); $('manual').value = ''; } };
+$('manual').onkeydown = e => { if (e.key === 'Enter') $('go').click(); };
+$('cfg').onclick = cfg;
+loadStats();
+</script>
+</body>
+</html>
