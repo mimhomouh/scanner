@@ -9,9 +9,9 @@
 <title>Scanner Jackesta</title>
 <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@500;700;800&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#101826;--panel:#1b2638;--text:#f2f5fa;--muted:#9fb0c8;--out:#2f7de1;--in:#f58a1f;--dup:#6b7686;--bad:#d64545;--ask:#d9a51c}
+:root{--bg:#101826;--panel:#1b2638;--text:#f2f5fa;--muted:#9fb0c8;--out:#2f7de1;--in:#f58a1f;--dup:#6b7686;--bad:#d64545;--ask:#d9a51c;--ok:#2e9e5b}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);font-family:Cairo,Tahoma,sans-serif;padding:env(safe-area-inset-top) 14px env(safe-area-inset-bottom)}
+body{margin:0;background:var(--bg);color:var(--text);font-family:Cairo,Tahoma,sans-serif;padding:env(safe-area-inset-top) 14px calc(24px + env(safe-area-inset-bottom))}
 header{display:flex;justify-content:space-between;align-items:center;padding:12px 0}
 h1{font-size:20px;margin:0}
 button{font:inherit;color:inherit;border:0;border-radius:10px;padding:10px 14px;background:var(--panel);cursor:pointer}
@@ -21,14 +21,23 @@ button{font:inherit;color:inherit;border:0;border-radius:10px;padding:10px 14px;
 #reader{margin:12px 0;border-radius:12px;overflow:hidden;background:#000;min-height:200px}
 .row{display:flex;gap:8px;margin-bottom:8px}.row>*{flex:1}
 .seg button.on{background:var(--out);font-weight:700}
+.seg button.on[data-m="ext"]{background:var(--ask);color:#1b1500}
 input{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid #33425a;background:var(--panel);color:var(--text);direction:ltr}
 #card{margin-top:12px;border-radius:14px;padding:16px;background:var(--panel);min-height:110px}
 #card h2{margin:0 0 6px;font-size:22px}
 #card p{margin:4px 0;font-size:16px}
 #card .meta{color:#fff;opacity:.85;font-size:14px}
-#card.out{background:var(--out)}#card.in{background:var(--in)}#card.dup{background:var(--dup)}
-#card.unknown,#card.error,#card.auth,#card.busy{background:var(--bad)}#card.confirm{background:var(--ask);color:#1b1500}
+#card.out{background:var(--out)}#card.in{background:var(--in)}#card.dup,#card.extdup{background:var(--dup)}
+#card.unknown,#card.error,#card.auth,#card.busy{background:var(--bad)}#card.confirm,#card.ext{background:var(--ask);color:#1b1500}
+#card.ext .meta,#card.confirm .meta{color:#1b1500}
 #card .acts{display:flex;gap:8px;margin-top:10px}#card .acts button{flex:1;background:#fff;color:#1b1500;font-weight:700}
+.hist{margin-top:22px}.hist h3{margin:0 0 10px;font-size:18px}
+#hsum{font-size:13px;color:var(--muted);margin:2px 0 10px}
+.hrow{display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--panel);border-radius:10px;padding:10px;margin-bottom:6px}
+.hrow small{display:block;color:var(--muted);font-size:12px}
+.hrow .id{direction:ltr;text-align:right;font-size:12px;color:var(--muted)}
+.tag{padding:4px 10px;border-radius:12px;font-size:13px;font-weight:700;color:#fff;white-space:nowrap}
+.tag.out{background:var(--out)}.tag.in{background:var(--in)}.tag.ret{background:var(--bad)}.tag.liv{background:var(--ok)}.tag.ext{background:var(--ask);color:#1b1500}.tag.na{background:var(--dup)}
 </style>
 </head>
 <body>
@@ -40,14 +49,23 @@ input{width:100%;font:inherit;padding:10px;border-radius:10px;border:1px solid #
 </div>
 <div id="reader"></div>
 <div class="row"><button id="start">تشغيل الكاميرا</button><button id="stop" hidden>إيقاف</button></div>
-<div class="row seg" id="seg"><button data-m="auto" class="on">تلقائي</button><button data-m="in">استلام مرتجع (IN)</button></div>
+<div class="row seg" id="seg"><button data-m="auto" class="on">تلقائي</button><button data-m="in">استلام مرتجع (IN)</button><button data-m="ext">📦 طرد خارجي</button></div>
 <div class="row"><input id="manual" placeholder="Tracking يدوياً: WHO-19C-…" autocomplete="off" autocapitalize="characters"><button id="go" style="flex:0 0 80px">إرسال</button></div>
 <div id="card"><h2>جاهز للمسح</h2><p class="meta">وجّه الكاميرا نحو الباركود على البوردورو</p></div>
+
+<div class="hist">
+  <h3>الأرشيف — HISTORIQUE</h3>
+  <div class="row"><input id="hday" type="date"><button id="hgo" style="flex:0 0 80px">عرض</button></div>
+  <div class="row"><button id="hToday">اليوم</button><button id="hYest">البارحة</button><button id="hAll">الكل</button></div>
+  <p id="hsum"></p>
+  <div id="histBox"></div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
 const API_URL = 'https://script.google.com/macros/s/AKfycbzgHZutWqZjwgic64A1oPKf7cvbzyLdoEXA0nOWcMshTS1q4Po4HNeZTU5MkzA36rPvsw/exec'; // رابط Web App بعد النشر
 const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 let token = localStorage.getItem('sc_token') || '', who = localStorage.getItem('sc_who') || 'iPhone';
 let mode = 'auto', busy = false, last = { code: '', t: 0 }, pending = null, qr = null;
 
@@ -57,7 +75,7 @@ function ensureToken() { if (!token) cfg(); return !!token; }
 function cfg() {
   const t = prompt('الرمز السري (نفس رمز Apps Script):', token); if (t !== null) { token = t.trim(); localStorage.setItem('sc_token', token); }
   const w = prompt('اسمك (يُسجل في السجل):', who); if (w !== null && w.trim()) { who = w.trim(); localStorage.setItem('sc_who', who); }
-  loadStats();
+  loadStats(); loadHist();
 }
 async function call(body) {
   const r = await fetch(API_URL, { method: 'POST', body: JSON.stringify(Object.assign({ token: token, who: who }, body)) });
@@ -67,20 +85,24 @@ async function loadStats() { if (!token) return; try { const r = await call({ ac
 
 function render(r, code) {
   const c = $('card'); c.className = r.result || 'error';
-  const titles = { out: '✅ تم تسجيل الخروج', in: '📥 تم الاستلام في المخزن', dup: '⚠️ مسجل سابقاً', unknown: '❌ باركود غير معروف', confirm: '❓ تأكيد مطلوب', auth: '🔒 رمز غير صحيح', busy: '⏳ مشغول', error: '❌ خطأ' };
-  let h = '<h2>' + (titles[r.result] || '❌ خطأ') + '</h2><p>' + (r.msg || '') + '</p>';
-  if (r.order) h += '<p class="meta">' + r.order + ' — ' + (r.name || '') + '<br>حالة Noest: ' + (r.noest || '—') + (r.time ? '<br>' + r.time : '') + '</p>';
-  if (r.warn) h += '<p class="meta">⚠ ' + r.warn + '</p>';
+  const titles = { out: '✅ تم تسجيل الخروج', in: '📥 تم الاستلام في المخزن', dup: '⚠️ مسجل سابقاً', unknown: '❌ باركود غير معروف', confirm: '❓ تأكيد مطلوب', auth: '🔒 رمز غير صحيح', busy: '⏳ مشغول', error: '❌ خطأ', ext: '📦 طرد خارجي مسجل', extdup: '⚠️ طرد خارجي مسجل سابقاً' };
+  if (r.result === 'ext') r.msg = 'حُفظ في الأرشيف — ' + r.code + ' • ' + r.time;
+  if (r.result === 'extdup') r.msg = (r.msg || '') + ' — ' + r.when;
+  let h = '<h2>' + (titles[r.result] || '❌ خطأ') + '</h2><p>' + esc(r.msg || '') + '</p>';
+  if (r.order) h += '<p class="meta">' + esc(r.order) + ' — ' + esc(r.name || '') + '<br>حالة Noest: ' + esc(r.noest || '—') + (r.time ? '<br>' + esc(r.time) : '') + '</p>';
+  if (r.warn) h += '<p class="meta">⚠ ' + esc(r.warn) + '</p>';
   if (r.result === 'confirm') { pending = { code: code, mode: r.pendingMode }; h += '<div class="acts"><button id="yes">نعم، سجّل</button><button id="no">إلغاء</button></div>'; }
   c.innerHTML = h;
   if (r.result === 'confirm') { $('yes').onclick = () => send(pending.code, true, pending.mode); $('no').onclick = () => { c.className = ''; c.innerHTML = '<h2>أُلغيت العملية</h2>'; }; }
-  beep(r.result === 'out' || r.result === 'in' ? 880 : 220, r.result === 'out' || r.result === 'in' ? 120 : 350);
+  const good = ['out', 'in', 'ext'].indexOf(r.result) > -1;
+  beep(good ? 880 : 220, good ? 120 : 350);
   stats(r.stats);
+  if (good) loadHist();
 }
 async function send(text, force, forceMode) {
   if (!ensureToken() || busy) return;
   busy = true; $('card').className = ''; $('card').innerHTML = '<h2>جاري التسجيل…</h2>';
-  try { render(await call({ code: text, mode: forceMode || mode, force: !!force }), text); }
+  try { const m = forceMode || mode; render(m === 'ext' ? await call({ action: 'ext', code: text }) : await call({ code: text, mode: m, force: !!force }), text); }
   catch (e) { render({ result: 'error', msg: 'تعذر الاتصال بالخادم: ' + e }); }
   busy = false;
 }
@@ -100,7 +122,30 @@ $('seg').onclick = e => { const m = e.target.dataset.m; if (!m) return; mode = m
 $('go').onclick = () => { const v = $('manual').value.trim(); if (v) { send(v, false); $('manual').value = ''; } };
 $('manual').onkeydown = e => { if (e.key === 'Enter') $('go').click(); };
 $('cfg').onclick = cfg;
-loadStats();
+
+// ===== الأرشيف حسب الأيام =====
+function dayStr(d) { const z = n => (n < 10 ? '0' : '') + n; return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()); }
+const ST = { out: 'مرسل', in: 'مستلم', ret: 'مرتجع', liv: 'مسلّم', ext: 'خارجي', na: '—' };
+const OPS = { OUT: 'خروج', IN: 'استلام مرتجع', EXT: 'طرد خارجي' };
+async function loadHist(day) {
+  if (!token) return;
+  if (day === undefined) day = $('hday').value || dayStr(new Date());
+  $('hday').value = day === 'all' ? '' : day;
+  $('histBox').textContent = 'جاري التحميل…';
+  try {
+    const h = (await call({ action: 'hist', day: day })).hist || { items: [], sum: {} };
+    $('hsum').textContent = 'خروج: ' + (h.sum.out || 0) + ' • مرتجعات مستلمة: ' + (h.sum.inn || 0) + ' • خارجية: ' + (h.sum.ext || 0);
+    $('histBox').innerHTML = h.items.map(x =>
+      '<div class="hrow"><div><b>' + esc(x.order || x.code) + '</b> ' + esc(x.name) + '<small>' + esc(x.time) + ' • ' + (OPS[x.op] || esc(x.op)) +
+      (x.noest ? ' • Noest: ' + esc(x.noest) : '') + '</small>' + (x.order ? '<span class="id">' + esc(x.code) + '</span>' : '') + '</div>' +
+      '<span class="tag ' + (ST[x.st] ? x.st : 'na') + '">' + (ST[x.st] || '—') + '</span></div>').join('') || 'لا توجد عمليات في هذا اليوم';
+  } catch (e) { $('histBox').textContent = 'تعذر الاتصال بالخادم'; }
+}
+$('hgo').onclick = () => loadHist(); $('hday').onchange = () => loadHist();
+$('hToday').onclick = () => loadHist(dayStr(new Date()));
+$('hYest').onclick = () => loadHist(dayStr(new Date(Date.now() - 864e5)));
+$('hAll').onclick = () => loadHist('all');
+loadStats(); loadHist();
 </script>
 </body>
 </html>
